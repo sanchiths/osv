@@ -91,7 +91,7 @@ zero_bss_loop:
         b.lo    zero_bss_loop
         ret
 
-// modified to handle AF and DF bits
+// modified to handle AF bit
 init_cpu:
         ic      iallu
         tlbi    vmalle1
@@ -117,28 +117,28 @@ init_cpu:
 
         // If hardware support is available, set the 39th (HA) bit of TCR_EL1
         cbnz    x0, set_ha_bit
-        b       check_df_bit_support
+        b       init_cpu_end
 set_ha_bit:
         ldr     x0, =0x15b5103510
         orr     x0, x0, #(1 << 39)
         msr     tcr_el1, x0
         isb
         b       init_cpu_end
+init_cpu_end:
+        ret
+
 check_df_bit_support:
         // Read ID_AA64MMFR1_EL1 to check for hardware support of DF bit
         mrs     x0, id_aa64mmfr1_el1
         lsr     x0, x0, #4
         and     x0, x0, #0xF
+        ret
 
-        // If hardware support is available, set the 40th (HD) bit of TCR_EL1
-        cbnz    x0, set_hd_bit
-        b       init_cpu_end
 set_hd_bit:
         ldr     x0, =0x15b5103510
         orr     x0, x0, #(1 << 40)
         msr     tcr_el1, x0
         isb
-init_cpu_end:
         ret
 
 fixup_boot_pt:

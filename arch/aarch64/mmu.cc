@@ -13,6 +13,7 @@
 
 #include "arch-cpu.hh"
 #include "exceptions.hh"
+#include "boot.S"
 
 #define ACCESS_FLAG_FAULT_LEVEL_3(esr)            ((esr & 0b0111111) == 0x0b) // 0xb = 0b1011 indicates level 3
 #define ACCESS_FLAG_FAULT_LEVEL_3_WHEN_WRITE(esr) ((esr & 0b1111111) == 0x4b)
@@ -24,6 +25,11 @@ T* phys_to_virt_cast(mmu::phys pa)
 {
     void *virt = mmu::phys_mem + pa;
     return static_cast<T*>(virt);
+}
+
+extern "C" {
+    bool check_df_bit_support();
+    void set_hd_bit();
 }
 
 static void handle_access_flag_fault(exception_frame *ef, u64 addr) {
@@ -59,8 +65,29 @@ static void handle_access_flag_fault(exception_frame *ef, u64 addr) {
     auto leaf_pte = l0_ptep.read();
 
     leaf_pte.set_accessed(true);
-    if (ACCESS_FLAG_FAULT_LEVEL_3_WHEN_WRITE(ef->esr)) {
-        leaf_pte.set_dirty(true);
+
+    // Check if the DF bit is clear
+    if (!leaf_pte.dirty()) {
+        // Set the DF bit if it was clear before the exception
+        if (ACCESS_FLAG_FAULT_LEVEL_3_WHEN_WRITE(ef->esr)) {
+            // Check for hardware support of the DF bit
+            uint64_t df_bit_support = 0;
+            asm volatile(
+                "bl check_df_bit_support\n\t"
+                "mov %0, x0\n\t"
+                : "=r"(df_bit_support)
+                :
+                : "x0"
+            );
+
+            if (df_bit_support != 0) {
+                // Set the HD bit in the TCR_EL1 register if hardware support is available
+                set_hd_bit();
+            } else {
+                // Set the DF bit using the set_dirty method if no hardware support is available
+                leaf_pte.set_dirty(true);
+            }
+        }
     }
 
     l0_ptep.write(leaf_pte);
