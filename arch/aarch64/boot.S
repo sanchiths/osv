@@ -91,6 +91,7 @@ zero_bss_loop:
         b.lo    zero_bss_loop
         ret
 
+// modified to handle AF and DF bits
 init_cpu:
         ic      iallu
         tlbi    vmalle1
@@ -107,31 +108,37 @@ init_cpu:
            keep in mind that for direct device assignment we might need
            to use the others too, and adapt the pt_element API */
         ldr     x0, =0xff440c0400
-        msr	mair_el1, x0
+        msr     mair_el1, x0
         isb
 
-        /* TCR - Translation Control Register
-         *
-         * 63                  39   38   37  36   35    34   32
-         * [        RES0         ] TBI1 TBI0 AS [RES0] [  IPS  ]
-         *                           0    0   1    0     1 0 1
-         *  31 30   29 28   27 26   25 24   23    22   21      16
-         * [ TG1 ] [ SH1 ] [ORGN1] [IRGN1] EPD1   A1   [  T1SZ   ]
-         *   1  0    1  1    0  1    0  1    0     0     010000
-         *  15 14   13 12   11 10    9  8    7     6    5       0
-         * [ TG0 ] [ SH0 ] [ORGN0] [IRGN0] EPD0 [RES0] [  T0SZ   ]
-         *   0  0    1  1    0  1    0  1    0     0     010000
-         */
+        // Read ID_AA64MMFR1_EL1 to check for hardware support of AF bit
+        mrs     x0, id_aa64mmfr1_el1
+        and     x0, x0, #0xF
 
-        /* we choose 4K granularity, 48-bit addresses, two subranges:
-         *
-         * TTBR1_EL1 -> 0xffff_0000_0000_0000 to 0xffff_ffff_ffff_ffff
-         * TTBR0_EL1 -> 0x0000_0000_0000_0000 to 0x0000_ffff_ffff_ffff
-         * ASID = 16bit TTBR
-         */
+        // If hardware support is available, set the 39th (HA) bit of TCR_EL1
+        cbnz    x0, set_ha_bit
+        b       check_df_bit_support
+set_ha_bit:
         ldr     x0, =0x15b5103510
+        orr     x0, x0, #(1 << 39)
         msr     tcr_el1, x0
         isb
+        b       init_cpu_end
+check_df_bit_support:
+        // Read ID_AA64MMFR1_EL1 to check for hardware support of DF bit
+        mrs     x0, id_aa64mmfr1_el1
+        lsr     x0, x0, #4
+        and     x0, x0, #0xF
+
+        // If hardware support is available, set the 40th (HD) bit of TCR_EL1
+        cbnz    x0, set_hd_bit
+        b       init_cpu_end
+set_hd_bit:
+        ldr     x0, =0x15b5103510
+        orr     x0, x0, #(1 << 40)
+        msr     tcr_el1, x0
+        isb
+init_cpu_end:
         ret
 
 fixup_boot_pt:
